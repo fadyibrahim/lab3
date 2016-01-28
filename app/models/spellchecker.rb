@@ -8,116 +8,95 @@ class Spellchecker
   #constructor.
   #text_file_name is the path to a local file with text to train the model (find actual words and their #frequency)
   #verbose is a flag to show traces of what's going on (useful for large files)
-  def initialize(text_file_name)
-    #read file text_file_name
-    #extract words from string (file contents) using method 'words' below.
-    #put in dictionary with their frequency (calling train! method)
-    f=File.read(text_file_name)
-	text = words(f) #extract words from string (file contents) using method 'words' below.
-    train!(text) #put in dictionary with their frequency (calling train! method)
-	
+  def initialize(text_file_name, verbose=false)
+    if verbose 
+      puts "getting corpus"
+    end
+    atext = File.read(text_file_name)
+    if verbose 
+      puts "training!"
+    end
+    train!(words(atext.downcase))
   end
-
+  
   def dictionary
-    #getter for instance attribute
-    return @dictionary
+    @dictionary
   end
   
   #returns an array of words in the text.
   def words (text)
-    return text.downcase.scan(/[a-z]+/) #find all matches of this simple regular expression
+    return text.scan(/[a-z]+/)
   end
 
-  #train model (create dictionary)
-  def train!(word_list)
-    #create @dictionary, an attribute of type Hash mapping words to their count in the text {word => count}. Default count should be 0 (argument of Hash constructor).
+  def train!(features)
     @dictionary = Hash.new(0)
-    word_list.each do |word|
-       @dictionary[word] += 1
-       end
-  end
-
-  #lookup frequency of a word, a simple lookup in the @dictionary Hash
-  def lookup(word)
-     return dictionary[word]
+    features.each do |f|
+      @dictionary[f] += 1
+    end
   end
   
-  #generate all correction candidates at an edit distance of 1 from the input word.
   def edits1(word)
-    d=0
-    deletes = Array.new
-
-    while d < word.length 
-    stringList=word.split(//)
-    stringList.delete_at(d)
-    stringNew="'#{stringList.join("','")}'".gsub(/[,']/,"")
-    deletes.push(stringNew)
-    d=d+1
-    end
-    #all strings obtained by deleting a letter (each letter)
-    t=0
-    transposes = Array.new
-    
-    while t < word.length-1
-    tempWord=word
-    templetter= word[t]
-    value =tempWord.gsub(tempWord[t],tempWord[t+1])
-    value[t+1]=templetter
-    #tempWord.sub(tempWord[t],tempWord[t+1]).sub(tempWord[t+1],templetter)
-    #tempWord.sub(tempWord[t+1],templetter)
-    #tempWord[t]=tempWord[t+1]
-    #tempWord[t+1]=templetter
-    transposes.push(value)
-    t=t +1
-    end
-    #all strings obtained by switching two consecutive letters
+    splits     =  Array(0..word.length).map{|i| [word[0...i], word[i..word.length]]}
+    deletes    = []
+    transposes = []
+    replaces = []
     inserts = []
-        for i in 0..word.length
-    	ALPHABET.each_char do |e|
-           str = word.dup
-           str = str.insert(i,e)
-	   inserts.push(str)
-	   end
-	end
-    # all strings obtained by inserting letters (all possible letters in all possible positions)
-    r=0
-    replaces=Array.new
-    
-    while r< word.length
-		tempWord=word
-		counter=0
-		while counter<ALPHABET.length
-			value=tempWord.gsub(tempWord[r],ALPHABET[counter])
-			replaces.push(value)
-			counter=counter+1
-		end
-		r=r+1
-	end
-    #all strings obtained by replacing letters (all possible letters in all possible positions)
-    return (deletes + transposes + replaces + inserts).to_set.to_a #eliminate duplicates, then convert back to array
+    #use the splits to generate distance-1 edits, with an extra letter (insert) a word missing (delete), two consecutive letters switched, or replaced letters (replaces).
+    splits.each do |a,b| 
+      #delete
+      drop =b[1..b.length]
+      if (drop)
+        deletes << a + drop    #beginning of word + end of word minus last letter of beginning
+      end
+      #transpose
+      if b.length>1
+        trans = a + b[1] + b[0] + b[2..b.length]
+        transposes << trans
+      end
+      #replace
+      if b.length>0
+        ALPHABET.each_char do |c|
+          repl   = a + c + b[1..b.length]
+          replaces << repl
+        end
+      end
+      #inserts
+      ALPHABET.each_char do |c|
+        ins   = a + c + b
+        inserts << ins
+      end     
+    end
+   
+    return (deletes + transposes + replaces + inserts).uniq
   end
   
+  #lookup frequency
+  def lookup(word)
+    return @dictionary[word]
+  end
 
   # find known (in dictionary) distance-2 edits of target word.
   def known_edits2 (word)
-    d2 = []
-    
-    d1 = edits1(word)
-    d1.each do |e|
-   	 d2.concat(edits1(e))
-    end 
-
-    return known(d2)
-    # get every possible distance - 2 edit of the input word. Return those that are in the dictionary.
+    result = []
+    edits1(word).each do |e1| 
+      result += edits1(e1)
+    end
+    if result.empty? 
+      return nil 
+    else
+      uniques = result.uniq
+      return known(uniques) #remove duplicates, check if the words are in the dictionary
+    end
   end
 
-  #return subset of the input words (argument is an array) that are known by this dictionary
+  #return subset of the input words that are known by this dictionary
   def known(words)
-  	result = words.find_all {|w| @dictionary.has_key?(w) }
-  	result.empty? ? nil : result
-    #find all words for which condition is true
-     #you need to figure out this condition
-    
+    result = words.find_all {|w| @dictionary.key?(w) } #find all words for which condition is true
+    if result.empty? 
+      return [] 
+    else
+      return result.sort_by {|e| 1-@dictionary[e]} #sort by descending frequency
+    end
   end
 
 
@@ -128,38 +107,49 @@ class Spellchecker
   # else if there are valid distance-2 replacements,
   # returns distance-2 replacements sorted by descending frequency in the model
   # else returns nil
-  def correct(word)
-  	good_words = []
-
-	good_words = known([word])
-	
-	if good_words 
-		if good_words.length == 1
-			return good_words
-		end
-	end
-	
-	good_words = known(edits1(word))
-	if !good_words
-		good_words = known_edits2(word)
-	end
-
-	if good_words
-		words_2 = []
-		@dictionary.sort_by {|k,v| v}.reverse.each do |key, value|
-			str = key.dup
-			if good_words.include?(str) == true
-				if words_2.include?(str) == false
-					words_2.push(str)
-		       		 end
-			end
-		end
-		return words_2
-	end
-	return nil
   
+  def correct(w)
+    unless known([w]).empty?
+      return [w] 
+    else
+      eds = known(edits1(w))
+      if eds.empty? #if no distance 1 edits
+        eds = known_edits2(w) #try distance 2 edits
+      end
+      unless (eds.empty?)
+        #eds.sort_by! {|e| 1-@dictionary[e]} #sorting was moved to 'known' method
+        return eds
+      else
+        return nil 
+      end #endif eds
+    end
   end
     
+  def manual_test
+    unless @dictionary
+      puts "untrained model"
+      return nil
+    end
+    loop do 
+      print "lookup word:"
+      w = gets.chomp
+      if w == ""
+        break
+      else 
+        eds = correct(w)
+        unless eds 
+          puts "-- no suggestions --"
+        end
+        if (eds == [w])
+          puts w + 'is a correct word'
+        else
+          eds.each do |e|
+            puts e +": "+ @dictionary[e].to_s
+          end
+        end
+      end
+    end
+  end
   
 end
 
