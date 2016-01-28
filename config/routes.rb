@@ -1,4 +1,6 @@
 Rails.application.routes.draw do
+  get 'dictionary_words_controller/spellcheck'
+  get 'spellcheck/:term'=>'dictionary_words_controller#spellcheck'
   resources :comments
   resources :blogposts
   root 'blogposts#index'
